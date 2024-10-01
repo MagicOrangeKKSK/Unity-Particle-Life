@@ -1,0 +1,83 @@
+#pragma kernel DrawAgents
+#pragma kernel ClearTexture
+
+struct Agent
+{
+    int type;
+    float2 position;
+    float2 velocity;
+};
+
+RWStructuredBuffer<Agent> agents;
+int numAgents;
+int width;
+int height;
+float dt;
+float speed;
+
+RWTexture2D<float4> TargetTexture;
+
+// 绘制圆形函数
+void DrawCircle(int2 center, int radius, float4 color)
+{
+    for (int y = -radius; y <= radius; y++)
+    {
+        for (int x = -radius; x <= radius; x++)
+        {
+            // 检查是否在圆内
+            if (x * x + y * y <= radius * radius)
+            {
+                int2 pixelCoord = center + int2(x, y);
+
+                // 检查坐标是否在纹理范围内
+                if (pixelCoord.x >= 0 && pixelCoord.x < width &&
+                    pixelCoord.y >= 0 && pixelCoord.y < height)
+                {
+                    TargetTexture[pixelCoord] = color; // 设置颜色
+                }
+            }
+        }
+    }
+}
+
+[numthreads(16,1,1)]
+void DrawAgents(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= numAgents)
+        return;
+    
+    Agent agent = agents[id.x];
+    
+    agent.position += agent.velocity * dt * speed;
+    
+    if(agent.position.x < 0)
+        agent.position.x += width;
+    if(agent.position.x >= width)
+        agent.position.x -= width;
+    
+    if(agent.position.y < 0)
+        agent.position.y += height;
+    if(agent.position.y >= height)
+        agent.position.y -= height;
+    
+    agents[id.x] = agent;
+    
+    int cellX = (int) agent.position.x;
+    int cellY = (int) agent.position.y;
+    DrawCircle(int2(cellX, cellY), 3, float4(1, 1, 1, 1));
+
+}
+
+// 清空纹理函数
+[numthreads(16, 16, 1)]
+void ClearTexture(uint3 id : SV_DispatchThreadID)
+{
+    int width, height;
+    TargetTexture.GetDimensions(width, height);
+
+    if (id.x >= width || id.y >= height)
+        return;
+
+    // 将每个像素点设置为黑色（或你想要的颜色）
+    TargetTexture[int2(id.x, id.y)] = float4(0, 0, 0, 1); // 黑色背景
+}

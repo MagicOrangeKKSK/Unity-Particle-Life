@@ -1,0 +1,132 @@
+#pragma kernel DrawParticleLife
+#pragma kernel ClearTexture
+
+struct Agent
+{
+    int type;
+    float2 position;
+    float2 velocity;
+};
+
+RWStructuredBuffer<Agent> agents;
+RWStructuredBuffer<float> agent_matrix;
+
+int totalType;
+
+int numAgents;
+int width;
+int height;
+
+float dt;
+float frictionHalfLife;
+float rMax;
+float frictionFactor;
+float forceFactor;
+float beta;
+
+RWTexture2D<float4> Result;
+
+
+float Force(float r, float a)
+{
+    if (r < beta)
+        return r / beta - 1.0;
+    else if (beta < r && r < 1.0) 
+        return a * (1.0 - abs(2.0 * r - 1.0 - beta) / (1.0 - beta));
+    return 0.0;
+}
+
+// HSV 到 RGB 转换函数
+float3 HSVtoRGB(float h, float s, float v)
+{
+    float3 rgb = clamp(abs(fmod(h * 6.0 + float3(0.0, 4.0, 2.0), 6) - 3.0) - 1.0, 0, 1);
+    rgb = rgb * rgb * (3.0 - 2.0 * rgb);
+    return v * lerp(float3(1, 1, 1), rgb, s);
+
+}
+
+void DrawCircle(int2 center, int radius, float4 color)
+{
+    for (int y = -radius; y <= radius; y++)
+    {
+        for (int x = -radius; x <= radius; x++)
+        {
+            // 检查是否在圆内
+            if (x * x + y * y <= radius * radius)
+            {
+                int2 pixelCoord = center + int2(x, y);
+
+                // 检查坐标是否在纹理范围内
+                if (pixelCoord.x >= 0 && pixelCoord.x < width &&
+                    pixelCoord.y >= 0 && pixelCoord.y < height)
+                {
+                    Result[pixelCoord] = color;  
+                }
+            }
+        }
+    }
+}
+
+[numthreads(16,1,1)]
+void DrawParticleLife(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numAgents)
+        return;
+    
+    Agent agent = agents[id.x];
+    float2 totalForce = float2(0, 0);
+    
+    for (int j = 0; j < numAgents; j++)
+    {
+        if (j == id.x)
+            continue;
+        
+        Agent other = agents[j];
+        float2 d = other.position - agent.position;
+ 
+        if (abs(d.x) > rMax || abs(d.y) > rMax)
+            continue;
+        
+        float r = length(d.xy);
+        if (r > 0 && r < rMax)
+        {
+            float f = Force(r / rMax, agent_matrix[agent.type * totalType + other.type]);
+            totalForce += normalize(d) * f;
+        }
+    }
+    
+    totalForce *= rMax * forceFactor;
+    agent.velocity *= frictionFactor;
+    agent.velocity += totalForce * dt;
+    agent.position += dt * agent.velocity;
+    
+    if (agent.position.x < 0)
+        agent.position.x += width;
+    if (agent.position.x >= width)
+        agent.position.x -= width;
+    
+    if (agent.position.y < 0)
+        agent.position.y += height;
+    if (agent.position.y >= height)
+        agent.position.y -= height;
+    
+    agents[id.x] = agent;
+  
+     
+    
+    float t1 = float(agent.type) / totalType;
+    float4 color = float4(HSVtoRGB(t1, 1, 1),1);
+    Result[int2(agent.position.x, agent.position.y)] = color;
+
+}
+
+// 清空纹理函数
+[numthreads(16, 16, 1)]
+void ClearTexture(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= width || id.y >= height)
+        return;
+
+    // 将每个像素点设置为黑色（或你想要的颜色）
+    Result[int2(id.x, id.y)] = float4(0, 0, 0, 1); // 黑色背景
+}
